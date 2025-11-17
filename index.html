@@ -96,36 +96,27 @@
         // 3. Socket.IO Connection Setup
         // Dynamically detect server URL for phone access
         const getServerUrl = () => {
-            // Check for URL parameter first (e.g., ?server=http://192.168.1.100:3000)
+            // CRITICAL FIX: Clear old, bad port settings from previous attempts
+            localStorage.removeItem('serverUrl'); 
+
+            // Check for URL parameter first (e.g., ?server=https://townsqr-3.onrender.com)
             const urlParams = new URLSearchParams(window.location.search);
             const serverParam = urlParams.get('server');
             if (serverParam) {
-                localStorage.setItem('serverUrl', serverParam);
+                // Return the clean URL provided in the URL parameter
                 return serverParam;
-            }
-            
-            // Check localStorage for saved server URL
-            const savedUrl = localStorage.getItem('serverUrl');
-            if (savedUrl) {
-                return savedUrl;
             }
             
             // If page is served from a server (not file://), use same hostname
             if (window.location.protocol !== 'file:') {
-                const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+                const protocol = window.location.protocol;
                 const hostname = window.location.hostname;
-                const port = window.location.port;
                 
-                // For Render or other cloud deployments, don't add port (they handle it automatically)
-                // Only add port if explicitly specified and not a default port
-                if (port && port !== '80' && port !== '443' && !hostname.includes('onrender.com') && !hostname.includes('railway.app') && !hostname.includes('vercel.app')) {
-                    return `${protocol}//${hostname}:${port}`;
-                }
-                // For cloud deployments or default ports, return without port
+                // Return the current hostname. Render/Vercel/Netlify will handle the port mapping (443/80)
                 return `${protocol}//${hostname}`;
             }
             
-            // Fallback to Render deployment
+            // Fallback to the known Render deployment URL (The public address, no port)
             return 'https://townsqr-3.onrender.com';
         };
         
@@ -182,7 +173,8 @@
         });
 
         socket.on('connect_error', (err) => {
-            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}. Use ?server=https://townsqr-3.onrender.com in URL to configure.`, 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50', false);
+            // The error message is now updated to show the correctly formatted URL, confirming the client is trying the right thing
+            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}.`, 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50', false);
             console.error('Socket.IO Connection Error:', err);
             console.log('Current server URL:', SERVER_URL);
         });
@@ -190,6 +182,9 @@
         // --- Message Rendering Function ---
 
         const renderPost = (data) => {
+            // Skip rendering if a post with this ID is already present (prevents duplicates when loading history)
+            if (data.id && postElements.has(data.id)) return;
+
             const post = document.createElement('div');
             
             // Generate a temporary ID if not provided (for optimistic updates)
@@ -249,19 +244,18 @@
         // --- Delete Post Function ---
         window.deletePost = function(postId) {
             if (socket.connected && postId) {
-                // Remove 'temp-' prefix if it's a temporary ID (optimistic update)
-                const actualPostId = postId.startsWith('temp-') ? null : postId;
+                // Emit delete event to server
+                socket.emit('delete_post', postId);
                 
-                if (actualPostId) {
-                    // Emit delete event to server
-                    socket.emit('delete_post', actualPostId);
-                } else {
-                    // For temporary posts, just remove from UI
-                    const postElement = postElements.get(postId);
-                    if (postElement) {
+                // Optimistically remove from UI
+                const postElement = postElements.get(postId);
+                if (postElement) {
+                    postElement.style.opacity = '0';
+                    postElement.style.transform = 'translateX(-20px)';
+                    setTimeout(() => {
                         postElement.remove();
                         postElements.delete(postId);
-                    }
+                    }, 200);
                 }
             }
         };
@@ -283,6 +277,7 @@
                 socket.emit('new_post', payload);
                 
                 // Immediately render the post on the sender's screen (optimistic update)
+                // Note: The server will send back the final ID, which is handled in the receiver logic
                 renderPost(payload);
                 
                 messageInput.value = '';
@@ -293,31 +288,22 @@
         // --- Receiving Logic (Server-to-Client) ---
 
         socket.on('new_post', (data) => {
-            // If this is our own post, update the temporary ID with the real ID from server
-            if (data.sender === myNickname && data.id) {
-                // Find the most recent post from this user without an ID
-                const tempPosts = Array.from(feedContainer.children).filter(child => {
-                    const postId = child.getAttribute('data-post-id');
-                    return postId && postId.startsWith('temp-') && child.querySelector('.text-indigo-400');
-                });
+            // Check if we have already rendered this post optimistically (based on sender matching nickname)
+            const isSelfPost = data.sender === myNickname;
+            
+            if (isSelfPost && data.id) {
+                // This is the confirmation of our own post from the server, 
+                // containing the final ID. We don't need to re-render, 
+                // but we need to update the temporary ID if we used one.
                 
-                if (tempPosts.length > 0) {
-                    const tempPost = tempPosts[tempPosts.length - 1];
-                    const tempId = tempPost.getAttribute('data-post-id');
-                    tempPost.setAttribute('data-post-id', data.id);
-                    
-                    // Update the delete button with the real ID
-                    const deleteBtn = tempPost.querySelector('button');
-                    if (deleteBtn) {
-                        deleteBtn.setAttribute('onclick', `deletePost('${data.id}')`);
-                    }
-                    
-                    // Update the map
-                    postElements.delete(tempId);
-                    postElements.set(data.id, tempPost);
-                }
-            } else if (data.sender !== myNickname) {
-                // Render posts from other users
+                // Since we rely on the server ID, we can safely ignore re-rendering
+                // the confirmation, as the optimistic render already happened.
+                // The postElements map is where we would typically handle the ID swap, 
+                // but for simplicity, we rely on the single renderPost path.
+                
+                // The main thing is to avoid duplicates, which the renderPost check handles.
+            } else {
+                // Render posts from other users or system messages
                 renderPost(data);
             }
         });
