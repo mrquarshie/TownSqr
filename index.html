@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Public Real-Time Feed</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Inter Font -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* Custom scrollbar for message box */
+        #feed-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        #feed-container::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 4px;
+        }
+        #feed-container::-webkit-scrollbar-track {
+            background-color: #f1f5f9;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-start py-8">
+
+    <div class="w-full max-w-lg">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">Town Sqr <span class="text-indigo-600">⚡</span></h1>
+            <p id="user-info" class="text-sm text-gray-500 mt-1"></p>
+        </header>
+
+        <!-- Connection Status & Message Feed -->
+        <div id="connection-status" class="text-center py-2 px-4 mb-4 text-xs font-medium rounded-lg shadow-sm">
+            Attempting to connect...
+        </div>
+
+        <div id="feed-container" class="bg-white p-4 rounded-xl shadow-lg h-[60vh] overflow-y-auto mb-6 border border-gray-200 space-y-4">
+            <!-- Messages will be appended here -->
+            <p class="text-center text-gray-400 p-8">Waiting for connection to server (http://localhost:3000)...</p>
+        </div>
+
+        <!-- Input Form -->
+        <form id="post-form" class="flex p-4 bg-white rounded-xl shadow-xl border border-indigo-100">
+            <input
+                type="text"
+                id="message-input"
+                placeholder="What's happening in the world?"
+                autocomplete="off"
+                class="flex-grow p-3 text-gray-700 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150 disabled:bg-gray-100"
+                required
+                disabled
+            >
+            <button
+                type="submit"
+                id="send-button"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-r-lg transition duration-150 ease-in-out shadow-md hover:shadow-lg disabled:bg-indigo-300"
+                disabled
+            >
+                Post
+            </button>
+        </form>
+    </div>
+
+    <!-- Socket.IO Client Library -->
+    <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+
+    <script>
+        // --- CLIENT-SIDE LOGIC ---
+
+        // 1. DOM Elements
+        const feedContainer = document.getElementById('feed-container');
+        const postForm = document.getElementById('post-form');
+        const messageInput = document.getElementById('message-input');
+        const userInfo = document.getElementById('user-info');
+        const sendButton = document.getElementById('send-button');
+        const connectionStatus = document.getElementById('connection-status');
+
+        // 2. Nickname Generation
+        const generateNickname = () => {
+            const adjectives = ['Curious', 'Witty', 'Silent', 'Swift', 'Bright', 'Clever', 'Agile', 'Vivid'];
+            const nouns = ['Panda', 'Eagle', 'Octopus', 'Raven', 'Whale', 'Llama', 'Tiger', 'Shark'];
+            const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+            const noun = nouns[Math.floor(Math.random() * nouns.length)];
+            const number = Math.floor(Math.random() * 900) + 100;
+            return `${adj}${noun}-${number}`;
+        };
+
+        const myNickname = generateNickname();
+        userInfo.textContent = `You are connected as: ${myNickname}`;
+
+        // 3. Socket.IO Connection Setup
+        // IMPORTANT: This assumes a Node.js Socket.IO server is running on http://localhost:3000
+        const SERVER_URL = 'http://localhost:3000';
+        const socket = io(SERVER_URL);
+
+        // --- Connection Status Handlers ---
+
+        const updateStatus = (message, className, enableControls = false) => {
+            connectionStatus.textContent = message;
+            connectionStatus.className = `text-center py-2 px-4 mb-4 text-xs font-medium rounded-lg shadow-sm ${className}`;
+            
+            messageInput.disabled = !enableControls;
+            sendButton.disabled = !enableControls;
+            
+            if (enableControls) {
+                // Clear initial placeholder text if present
+                if (feedContainer.firstElementChild && feedContainer.firstElementChild.classList.contains('text-center')) {
+                    feedContainer.innerHTML = '';
+                }
+            }
+        };
+
+        socket.on('connect', () => {
+            updateStatus('Connected to the Global Feed!', 'bg-green-100 text-green-700', true);
+            
+            // Send a notification that the user joined
+            socket.emit('new_post', {
+                sender: 'System', 
+                content: `${myNickname} has entered the chat.`,
+                isSystem: true
+            });
+        });
+
+        socket.on('disconnect', () => {
+            updateStatus('Disconnected. Please restart the server.', 'bg-red-100 text-red-700', false);
+        });
+
+        socket.on('connect_error', (err) => {
+            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}`, 'bg-yellow-100 text-yellow-700', false);
+            console.error('Socket.IO Connection Error:', err);
+        });
+
+        // --- Message Rendering Function ---
+
+        const renderPost = (data) => {
+            const post = document.createElement('div');
+            
+            // Basic class structure for a post
+            post.classList.add('p-3', 'rounded-lg', 'break-words', 'shadow-sm', 'transition', 'duration-150');
+
+            let senderClass, contentClass, senderName;
+
+            if (data.isSystem) {
+                // System message styling
+                senderName = 'System';
+                senderClass = 'text-gray-500 italic';
+                contentClass = 'text-gray-600 text-sm';
+                post.classList.add('bg-gray-100');
+            } else if (data.sender === myNickname) {
+                // My message styling
+                senderName = 'You';
+                senderClass = 'font-bold text-indigo-600';
+                contentClass = 'text-gray-800';
+                post.classList.add('bg-indigo-50', 'border', 'border-indigo-200');
+            } else {
+                // Other user message styling
+                senderName = data.sender;
+                senderClass = 'font-semibold text-gray-800';
+                contentClass = 'text-gray-700';
+                post.classList.add('bg-white', 'border', 'border-gray-100');
+            }
+
+            post.innerHTML = `
+                <div class="${senderClass} text-xs mb-1">@${senderName}</div>
+                <p class="${contentClass}">${data.content}</p>
+            `;
+            
+            feedContainer.appendChild(post);
+            // Auto-scroll to the bottom of the feed
+            feedContainer.scrollTop = feedContainer.scrollHeight;
+        };
+        
+        // --- Sending Logic (Client-to-Server) ---
+
+        postForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const content = messageInput.value.trim();
+
+            if (content && socket.connected) {
+                const payload = {
+                    sender: myNickname,
+                    content: content,
+                    isSystem: false
+                };
+                
+                // Emit the new post event to the server
+                socket.emit('new_post', payload);
+                
+                // Immediately render the post on the sender's screen (optimistic update)
+                renderPost(payload);
+                
+                messageInput.value = '';
+                messageInput.focus();
+            }
+        });
+
+        // --- Receiving Logic (Server-to-Client) ---
+
+        socket.on('new_post', (data) => {
+            // Check if the received message is not from this client, because we already rendered our own posts
+            if (data.sender !== myNickname) {
+                renderPost(data);
+            }
+        });
+        
+    </script>
+</body>
+</html>
