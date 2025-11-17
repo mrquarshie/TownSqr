@@ -30,7 +30,7 @@
 
     <div class="w-full max-w-lg">
         <header class="text-center mb-6">
-            <h1 class="text-3xl font-bold text-gray-100">Town Sqr <span class="text-indigo-400">⚡</span></h1>
+            <h1 class="text-3xl font-bold text-gray-100">Town Square <span class="text-indigo-400">🛖💬</span></h1>
             <p id="user-info" class="text-sm text-gray-400 mt-1"></p>
         </header>
 
@@ -41,7 +41,7 @@
 
         <div id="feed-container" class="bg-[#252836] p-4 rounded-xl shadow-lg h-[60vh] overflow-y-auto mb-6 border border-gray-700 space-y-4">
             <!-- Messages will be appended here -->
-            <p class="text-center text-gray-500 p-8">Waiting for connection to server (http://localhost:3000)...</p>
+            <p class="text-center text-gray-500 p-8">Waiting for connection to server...</p>
         </div>
 
         <!-- Input Form -->
@@ -94,8 +94,37 @@
         userInfo.textContent = `You are connected as: ${myNickname}`;
 
         // 3. Socket.IO Connection Setup
-        // IMPORTANT: This assumes a Node.js Socket.IO server is running on http://localhost:3000
-        const SERVER_URL = 'http://localhost:3000';
+        // Dynamically detect server URL for phone access
+        const getServerUrl = () => {
+            // Check for URL parameter first (e.g., ?server=http://192.168.1.100:3000)
+            const urlParams = new URLSearchParams(window.location.search);
+            const serverParam = urlParams.get('server');
+            if (serverParam) {
+                localStorage.setItem('serverUrl', serverParam);
+                return serverParam;
+            }
+            
+            // Check localStorage for saved server URL
+            const savedUrl = localStorage.getItem('serverUrl');
+            if (savedUrl) {
+                return savedUrl;
+            }
+            
+            // If page is served from a server (not file://), use same hostname and port
+            if (window.location.protocol !== 'file:') {
+                const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+                const hostname = window.location.hostname;
+                const port = window.location.port || (protocol === 'https:' ? '443' : '80');
+                // If port is default, use 3000 for Socket.IO server
+                const serverPort = (port === '80' || port === '443') ? '3000' : port;
+                return `${protocol}//${hostname}:${serverPort}`;
+            }
+            
+            // Fallback to localhost:3000
+            return 'http://localhost:3000';
+        };
+        
+        const SERVER_URL = getServerUrl();
         const socket = io(SERVER_URL);
 
         // --- Connection Status Handlers ---
@@ -129,13 +158,28 @@
             });
         });
 
+        // Handle initial posts from server (if any)
+        socket.on('initial_posts', (posts) => {
+            if (posts && posts.length > 0) {
+                // Clear the waiting message
+                if (feedContainer.firstElementChild && feedContainer.firstElementChild.classList.contains('text-center')) {
+                    feedContainer.innerHTML = '';
+                }
+                // Render all initial posts
+                posts.forEach(post => {
+                    renderPost(post);
+                });
+            }
+        });
+
         socket.on('disconnect', () => {
             updateStatus('Disconnected. Please restart the server.', 'bg-red-900/30 text-red-400 border border-red-800/50', false);
         });
 
         socket.on('connect_error', (err) => {
-            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}`, 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50', false);
+            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}. Use ?server=http://192.168.82.233:3000 in URL to configure.`, 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50', false);
             console.error('Socket.IO Connection Error:', err);
+            console.log('Current server URL:', SERVER_URL);
         });
 
         // --- Message Rendering Function ---
@@ -244,9 +288,46 @@
         // --- Receiving Logic (Server-to-Client) ---
 
         socket.on('new_post', (data) => {
-            // Check if the received message is not from this client, because we already rendered our own posts
-            if (data.sender !== myNickname) {
+            // If this is our own post, update the temporary ID with the real ID from server
+            if (data.sender === myNickname && data.id) {
+                // Find the most recent post from this user without an ID
+                const tempPosts = Array.from(feedContainer.children).filter(child => {
+                    const postId = child.getAttribute('data-post-id');
+                    return postId && postId.startsWith('temp-') && child.querySelector('.text-indigo-400');
+                });
+                
+                if (tempPosts.length > 0) {
+                    const tempPost = tempPosts[tempPosts.length - 1];
+                    const tempId = tempPost.getAttribute('data-post-id');
+                    tempPost.setAttribute('data-post-id', data.id);
+                    
+                    // Update the delete button with the real ID
+                    const deleteBtn = tempPost.querySelector('button');
+                    if (deleteBtn) {
+                        deleteBtn.setAttribute('onclick', `deletePost('${data.id}')`);
+                    }
+                    
+                    // Update the map
+                    postElements.delete(tempId);
+                    postElements.set(data.id, tempPost);
+                }
+            } else if (data.sender !== myNickname) {
+                // Render posts from other users
                 renderPost(data);
+            }
+        });
+
+        // --- Handle Post Deletion from Server ---
+        socket.on('post_deleted', (postId) => {
+            const postElement = postElements.get(postId);
+            if (postElement) {
+                // Add fade-out animation
+                postElement.style.opacity = '0';
+                postElement.style.transform = 'translateX(-20px)';
+                setTimeout(() => {
+                    postElement.remove();
+                    postElements.delete(postId);
+                }, 200);
             }
         });
         

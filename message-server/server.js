@@ -11,6 +11,10 @@ const PORT = process.env.PORT || 3000;
 const app = express();
 const server = http.createServer(app);
 
+// Serve static files (index.html) from the parent directory
+const path = require('path');
+app.use(express.static(path.join(__dirname, '..')));
+
 // Initialize Socket.IO with CORS enabled for the client to connect
 // The '*' origin is acceptable for development purposes.
 const io = socketio(server, {
@@ -83,9 +87,29 @@ io.on('connection', (socket) => {
 });
 
 // --- Start the Server ---
-server.listen(PORT, () => {
+// Listen on all network interfaces (0.0.0.0) to allow phone access
+server.listen(PORT, '0.0.0.0', () => {
+    const os = require('os');
+    const networkInterfaces = os.networkInterfaces();
+    let localIP = 'localhost';
+    
+    // Find the first non-internal IPv4 address
+    for (const interfaceName in networkInterfaces) {
+        const addresses = networkInterfaces[interfaceName];
+        for (const addr of addresses) {
+            if (addr.family === 'IPv4' && !addr.internal) {
+                localIP = addr.address;
+                break;
+            }
+        }
+        if (localIP !== 'localhost') break;
+    }
+    
     console.log(`\n======================================================`);
     console.log(`SERVER RUNNING: Socket.IO listening on port ${PORT}`);
-    console.log(`-> Now open the 'index.html' file in your browser to connect.`);
+    console.log(`\nAccess the app from:`);
+    console.log(`  - Local: http://localhost:${PORT}`);
+    console.log(`  - Network: http://${localIP}:${PORT}`);
+    console.log(`\nOn your phone, use: http://${localIP}:${PORT}`);
     console.log(`======================================================\n`);
 });
