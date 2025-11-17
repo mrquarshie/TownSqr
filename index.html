@@ -11,18 +11,18 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f7f9fb;
+            background-color: #1a1d29;
         }
         /* Custom scrollbar for message box */
         #feed-container::-webkit-scrollbar {
             width: 8px;
         }
         #feed-container::-webkit-scrollbar-thumb {
-            background-color: #cbd5e1;
+            background-color: #4a5568;
             border-radius: 4px;
         }
         #feed-container::-webkit-scrollbar-track {
-            background-color: #f1f5f9;
+            background-color: #2d3142;
         }
     </style>
 </head>
@@ -30,8 +30,8 @@
 
     <div class="w-full max-w-lg">
         <header class="text-center mb-6">
-            <h1 class="text-3xl font-bold text-gray-800">Town Sqr <span class="text-indigo-600">⚡</span></h1>
-            <p id="user-info" class="text-sm text-gray-500 mt-1"></p>
+            <h1 class="text-3xl font-bold text-gray-100">Town Sqr <span class="text-indigo-400">⚡</span></h1>
+            <p id="user-info" class="text-sm text-gray-400 mt-1"></p>
         </header>
 
         <!-- Connection Status & Message Feed -->
@@ -39,26 +39,26 @@
             Attempting to connect...
         </div>
 
-        <div id="feed-container" class="bg-white p-4 rounded-xl shadow-lg h-[60vh] overflow-y-auto mb-6 border border-gray-200 space-y-4">
+        <div id="feed-container" class="bg-[#252836] p-4 rounded-xl shadow-lg h-[60vh] overflow-y-auto mb-6 border border-gray-700 space-y-4">
             <!-- Messages will be appended here -->
-            <p class="text-center text-gray-400 p-8">Waiting for connection to server (http://localhost:3000)...</p>
+            <p class="text-center text-gray-500 p-8">Waiting for connection to server (http://localhost:3000)...</p>
         </div>
 
         <!-- Input Form -->
-        <form id="post-form" class="flex p-4 bg-white rounded-xl shadow-xl border border-indigo-100">
+        <form id="post-form" class="flex p-4 bg-[#252836] rounded-xl shadow-xl border border-indigo-800/50">
             <input
                 type="text"
                 id="message-input"
                 placeholder="What's happening in the world?"
                 autocomplete="off"
-                class="flex-grow p-3 text-gray-700 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150 disabled:bg-gray-100"
+                class="flex-grow p-3 text-gray-100 bg-[#1e2130] border border-gray-600 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150 disabled:bg-gray-800 disabled:text-gray-500 placeholder-gray-500"
                 required
                 disabled
             >
             <button
                 type="submit"
                 id="send-button"
-                class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-r-lg transition duration-150 ease-in-out shadow-md hover:shadow-lg disabled:bg-indigo-300"
+                class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-r-lg transition duration-150 ease-in-out shadow-md hover:shadow-lg disabled:bg-indigo-900 disabled:text-gray-500"
                 disabled
             >
                 Post
@@ -100,6 +100,9 @@
 
         // --- Connection Status Handlers ---
 
+        // Store post elements by ID for deletion
+        const postElements = new Map();
+
         const updateStatus = (message, className, enableControls = false) => {
             connectionStatus.textContent = message;
             connectionStatus.className = `text-center py-2 px-4 mb-4 text-xs font-medium rounded-lg shadow-sm ${className}`;
@@ -116,7 +119,7 @@
         };
 
         socket.on('connect', () => {
-            updateStatus('Connected to the Global Feed!', 'bg-green-100 text-green-700', true);
+            updateStatus('Connected to the Global Feed!', 'bg-green-900/30 text-green-400 border border-green-800/50', true);
             
             // Send a notification that the user joined
             socket.emit('new_post', {
@@ -127,11 +130,11 @@
         });
 
         socket.on('disconnect', () => {
-            updateStatus('Disconnected. Please restart the server.', 'bg-red-100 text-red-700', false);
+            updateStatus('Disconnected. Please restart the server.', 'bg-red-900/30 text-red-400 border border-red-800/50', false);
         });
 
         socket.on('connect_error', (err) => {
-            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}`, 'bg-yellow-100 text-yellow-700', false);
+            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}`, 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50', false);
             console.error('Socket.IO Connection Error:', err);
         });
 
@@ -140,39 +143,78 @@
         const renderPost = (data) => {
             const post = document.createElement('div');
             
+            // Generate a temporary ID if not provided (for optimistic updates)
+            const postId = data.id || `temp-${Date.now()}-${Math.random()}`;
+            post.setAttribute('data-post-id', postId);
+            
             // Basic class structure for a post
-            post.classList.add('p-3', 'rounded-lg', 'break-words', 'shadow-sm', 'transition', 'duration-150');
+            post.classList.add('p-3', 'rounded-lg', 'break-words', 'shadow-sm', 'transition', 'duration-150', 'relative', 'group');
 
-            let senderClass, contentClass, senderName;
+            let senderClass, contentClass, senderName, deleteButtonHtml = '';
 
             if (data.isSystem) {
                 // System message styling
                 senderName = 'System';
-                senderClass = 'text-gray-500 italic';
-                contentClass = 'text-gray-600 text-sm';
-                post.classList.add('bg-gray-100');
+                senderClass = 'text-gray-400 italic';
+                contentClass = 'text-gray-400 text-sm';
+                post.classList.add('bg-[#1e2130]', 'border', 'border-gray-700/50');
             } else if (data.sender === myNickname) {
                 // My message styling
                 senderName = 'You';
-                senderClass = 'font-bold text-indigo-600';
-                contentClass = 'text-gray-800';
-                post.classList.add('bg-indigo-50', 'border', 'border-indigo-200');
+                senderClass = 'font-bold text-indigo-400';
+                contentClass = 'text-gray-200';
+                post.classList.add('bg-indigo-900/20', 'border', 'border-indigo-700/50');
+                // Add delete button for user's own posts
+                deleteButtonHtml = `
+                    <button 
+                        class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/30 rounded-full p-1.5 text-xs font-semibold"
+                        onclick="deletePost('${postId}')"
+                        title="Delete post"
+                    >
+                        ✕
+                    </button>
+                `;
             } else {
                 // Other user message styling
                 senderName = data.sender;
-                senderClass = 'font-semibold text-gray-800';
-                contentClass = 'text-gray-700';
-                post.classList.add('bg-white', 'border', 'border-gray-100');
+                senderClass = 'font-semibold text-gray-300';
+                contentClass = 'text-gray-300';
+                post.classList.add('bg-[#1e2130]', 'border', 'border-gray-700/50');
             }
 
             post.innerHTML = `
+                ${deleteButtonHtml}
                 <div class="${senderClass} text-xs mb-1">@${senderName}</div>
                 <p class="${contentClass}">${data.content}</p>
             `;
             
             feedContainer.appendChild(post);
+            
+            // Store the post element by ID for deletion
+            postElements.set(postId, post);
+            
             // Auto-scroll to the bottom of the feed
             feedContainer.scrollTop = feedContainer.scrollHeight;
+        };
+
+        // --- Delete Post Function ---
+        window.deletePost = function(postId) {
+            if (socket.connected && postId) {
+                // Remove 'temp-' prefix if it's a temporary ID (optimistic update)
+                const actualPostId = postId.startsWith('temp-') ? null : postId;
+                
+                if (actualPostId) {
+                    // Emit delete event to server
+                    socket.emit('delete_post', actualPostId);
+                } else {
+                    // For temporary posts, just remove from UI
+                    const postElement = postElements.get(postId);
+                    if (postElement) {
+                        postElement.remove();
+                        postElements.delete(postId);
+                    }
+                }
+            }
         };
         
         // --- Sending Logic (Client-to-Server) ---
