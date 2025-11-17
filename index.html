@@ -120,8 +120,8 @@
                 return `${protocol}//${hostname}:${serverPort}`;
             }
             
-            // Fallback to Railway deployment
-            return 'http://townsqr.railway.internal';
+            // Fallback to Render deployment
+            return 'https://townsqr-3.onrender.com';
         };
         
         const SERVER_URL = getServerUrl();
@@ -177,7 +177,7 @@
         });
 
         socket.on('connect_error', (err) => {
-            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}. Use ?server=http://townsqr.railway.internal in URL to configure.`, 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50', false);
+            updateStatus(`Connection Error: Check if server is running on ${SERVER_URL}. Use ?server=https://townsqr-3.onrender.com in URL to configure.`, 'bg-yellow-900/30 text-yellow-400 border border-yellow-800/50', false);
             console.error('Socket.IO Connection Error:', err);
             console.log('Current server URL:', SERVER_URL);
         });
