@@ -81,7 +81,7 @@ const VALID_SCHOOLS = [
     'knust',
     'university of ghana',
     'upsa'
-    'ucc'
+    
 ];
 
 // --- REST API Endpoints ---
