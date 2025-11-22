@@ -265,7 +265,7 @@
                                                hostname.includes('firebaseapp.com');
                 
                 if (isFrontendCloudPlatform) {
-                    return 'https://townsqr-3.onrender.com';
+                    return 'https://townsqr-1-sh45.onrender.com';
                 }
                 
                 const isBackendCloudPlatform = hostname.includes('onrender.com') || 
@@ -282,9 +282,9 @@
                 return `${protocol}//${hostname}:${port}`;
             }
             
-            return 'https://townsqr-3.onrender.com';
+            return 'https://townsqr-1-sh45.onrender.com';
         };
-
+        
         const SERVER_URL = getServerUrl();
         const API_URL = SERVER_URL;
 
@@ -460,7 +460,15 @@
                 userInfo.textContent = `@${currentUser.displayName || currentUser.username} • ${getSchoolDisplayName(currentUser.school)}`;
                 
                 if (currentUser.avatar) {
-                    userAvatar.src = `${API_URL}${currentUser.avatar}`;
+                    const avatarUrl = currentUser.avatar.startsWith('/uploads') 
+                        ? `${API_URL}${currentUser.avatar}` 
+                        : `${API_URL}${currentUser.avatar}`;
+                    userAvatar.src = avatarUrl;
+                    userAvatar.onerror = () => {
+                        userAvatar.classList.add('hidden');
+                        userAvatarPlaceholder.classList.remove('hidden');
+                        userAvatarPlaceholder.textContent = (currentUser.displayName || currentUser.username)[0].toUpperCase();
+                    };
                     userAvatar.classList.remove('hidden');
                     userAvatarPlaceholder.classList.add('hidden');
                 } else {
@@ -493,18 +501,30 @@
                 postElements.clear();
                 
                 if (posts && posts.length > 0) {
-                    posts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-                    posts.forEach(post => {
+                    // Filter posts based on current room
+                    let filteredPosts = posts;
+                    if (currentRoom !== 'general') {
+                        filteredPosts = posts.filter(post => 
+                            post.room === currentRoom || post.room === 'general'
+                        );
+                    }
+                    
+                    filteredPosts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                    filteredPosts.forEach(post => {
                         renderPost(post);
                     });
                 }
             });
             
             socket.on('new_post', (data) => {
-                if (data.room !== currentRoom && currentRoom !== 'general') {
-                    return;
+                // Only show posts from current room or general room
+                // If viewing general, show all posts
+                // If viewing school room, show posts from that school or general
+                if (currentRoom === 'general') {
+                    renderPost(data);
+                } else if (data.room === currentRoom || data.room === 'general') {
+                    renderPost(data);
                 }
-                renderPost(data);
             });
             
             socket.on('post_replied', (data) => {
@@ -587,7 +607,7 @@
             roomButtons.forEach(btn => {
                 btn.disabled = !enableControls;
             });
-        }
+            }
 
         function joinRoom(roomName) {
             if (!socket || !socket.connected) return;
@@ -605,7 +625,7 @@
                 }
             });
             
-            roomSelect.value = roomName;
+                roomSelect.value = roomName;
             currentRoomDisplay.textContent = `Current Room: ${getSchoolEmoji(roomName)} ${getSchoolDisplayName(roomName)}`;
             
             feedContainer.innerHTML = '';
@@ -616,7 +636,7 @@
             btn.addEventListener('click', () => {
                 const roomName = btn.getAttribute('data-room');
                 if (roomName === 'general' || roomName === currentUser?.school) {
-                    joinRoom(roomName);
+                joinRoom(roomName);
                 } else {
                     alert('You can only access General room and your school room');
                 }
@@ -710,8 +730,20 @@
             imagePreview.classList.add('hidden');
         });
 
+        // Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         // Render post
         function renderPost(data) {
+            // Check if post already exists to avoid duplicates
+            if (data.id && postElements.has(data.id)) {
+                return;
+            }
+            
             const post = document.createElement('div');
             const postId = data.id || `temp-${Date.now()}-${Math.random()}`;
             post.setAttribute('data-post-id', postId);
@@ -720,46 +752,65 @@
             post.classList.add('p-4', 'rounded-lg', 'break-words', 'shadow-sm', 'transition', 'duration-150', 'relative', 'group', 'bg-[#1e2130]', 'border', 'border-gray-700/50', 'mb-4');
 
             const isOwnPost = data.sender === currentUser?.username;
-            const senderName = isOwnPost ? 'You' : (data.displayName || data.sender);
+            const senderName = isOwnPost ? 'You' : (data.displayName || data.sender || 'Unknown');
             const senderClass = isOwnPost ? 'font-bold text-indigo-400' : 'font-semibold text-gray-300';
             
-            const avatarHtml = data.avatar 
-                ? `<img src="${API_URL}${data.avatar}" class="w-10 h-10 rounded-full object-cover border-2 border-indigo-500">`
-                : `<div class="avatar-placeholder">${(data.displayName || data.sender)[0].toUpperCase()}</div>`;
+            // Handle avatar URL - check if it already starts with /uploads
+            const avatarUrl = data.avatar 
+                ? (data.avatar.startsWith('/uploads') ? `${API_URL}${data.avatar}` : `${API_URL}${data.avatar}`)
+                : null;
+            
+            const avatarHtml = avatarUrl
+                ? `<img src="${escapeHtml(avatarUrl)}" class="w-10 h-10 rounded-full object-cover border-2 border-indigo-500" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                   <div class="avatar-placeholder" style="display:none;">${escapeHtml(senderName[0].toUpperCase())}</div>`
+                : `<div class="avatar-placeholder">${escapeHtml(senderName[0].toUpperCase())}</div>`;
 
             const timestamp = formatTimestamp(data.timestamp);
             const deleteButtonHtml = isOwnPost ? `
-                <button 
-                    class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/30 rounded-full p-1.5 text-xs font-semibold"
-                    onclick="deletePost('${postId}')"
-                    title="Delete post"
-                >
-                    ✕
-                </button>
+                    <button 
+                        class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/30 rounded-full p-1.5 text-xs font-semibold"
+                    onclick="deletePost('${escapeHtml(postId)}')"
+                        title="Delete post"
+                    >
+                        ✕
+                    </button>
             ` : '';
 
-            const imageHtml = data.imageUrl ? `
+            // Handle image URL - check if it already starts with /uploads
+            const imageUrl = data.imageUrl 
+                ? (data.imageUrl.startsWith('/uploads') ? `${API_URL}${data.imageUrl}` : `${API_URL}${data.imageUrl}`)
+                : null;
+            
+            const imageHtml = imageUrl ? `
                 <div class="mt-2">
-                    <img src="${API_URL}${data.imageUrl}" alt="Post image" class="max-w-full rounded-lg">
+                    <img src="${escapeHtml(imageUrl)}" alt="Post image" class="max-w-full rounded-lg" onerror="this.parentElement.style.display='none';">
                 </div>
             ` : '';
 
             const repliesHtml = data.replies && data.replies.length > 0 ? `
                 <div class="mt-3 pt-3 border-t border-gray-700 space-y-2">
                     ${data.replies.map(reply => {
-                        const replyAvatar = reply.avatar 
-                            ? `<img src="${API_URL}${reply.avatar}" class="w-8 h-8 rounded-full object-cover">`
-                            : `<div class="avatar-placeholder" style="width: 32px; height: 32px; font-size: 12px;">${(reply.displayName || reply.sender)[0].toUpperCase()}</div>`;
-                        const replyImage = reply.imageUrl ? `<img src="${API_URL}${reply.imageUrl}" alt="Reply image" class="max-w-full rounded-lg mt-1">` : '';
+                        const replySenderName = reply.displayName || reply.sender || 'Unknown';
+                        const replyAvatarUrl = reply.avatar 
+                            ? (reply.avatar.startsWith('/uploads') ? `${API_URL}${reply.avatar}` : `${API_URL}${reply.avatar}`)
+                            : null;
+                        const replyAvatar = replyAvatarUrl
+                            ? `<img src="${escapeHtml(replyAvatarUrl)}" class="w-8 h-8 rounded-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                               <div class="avatar-placeholder" style="width: 32px; height: 32px; font-size: 12px; display:none;">${escapeHtml(replySenderName[0].toUpperCase())}</div>`
+                            : `<div class="avatar-placeholder" style="width: 32px; height: 32px; font-size: 12px;">${escapeHtml(replySenderName[0].toUpperCase())}</div>`;
+                        const replyImageUrl = reply.imageUrl 
+                            ? (reply.imageUrl.startsWith('/uploads') ? `${API_URL}${reply.imageUrl}` : `${API_URL}${reply.imageUrl}`)
+                            : null;
+                        const replyImage = replyImageUrl ? `<img src="${escapeHtml(replyImageUrl)}" alt="Reply image" class="max-w-full rounded-lg mt-1" onerror="this.style.display='none';">` : '';
                         return `
                             <div class="flex gap-2">
                                 ${replyAvatar}
                                 <div class="flex-1">
                                     <div class="text-xs ${reply.sender === currentUser?.username ? 'text-indigo-400 font-bold' : 'text-gray-300 font-semibold'}">
-                                        @${reply.displayName || reply.sender}
-                                        <span class="text-gray-500 ml-2">${formatTimestamp(reply.timestamp)}</span>
+                                        @${escapeHtml(replySenderName)}
+                                        <span class="text-gray-500 ml-2">${escapeHtml(formatTimestamp(reply.timestamp))}</span>
                                     </div>
-                                    <div class="text-gray-300 text-sm mt-1">${reply.content || ''}</div>
+                                    <div class="text-gray-300 text-sm mt-1">${escapeHtml(reply.content || '')}</div>
                                     ${replyImage}
                                 </div>
                             </div>
@@ -774,15 +825,15 @@
                     ${avatarHtml}
                     <div class="flex-1">
                         <div class="${senderClass} text-sm mb-1 flex items-center flex-wrap">
-                            @${senderName}
-                            <span class="text-gray-500 text-xs ml-2">${timestamp}</span>
+                            @${escapeHtml(senderName)}
+                            <span class="text-gray-500 text-xs ml-2">${escapeHtml(timestamp)}</span>
                         </div>
-                        <p class="text-gray-200 mb-2">${data.content || ''}</p>
+                        <p class="text-gray-200 mb-2">${escapeHtml(data.content || '')}</p>
                         ${imageHtml}
                         ${repliesHtml}
                         <div class="mt-2">
                             <button 
-                                onclick="showReplyForm('${postId}')"
+                                onclick="showReplyForm('${escapeHtml(postId)}')"
                                 class="text-xs text-indigo-400 hover:text-indigo-300 transition duration-150"
                             >
                                 💬 Reply
@@ -790,11 +841,11 @@
                         </div>
                     </div>
                 </div>
-                <div id="reply-form-${postId}" class="hidden mt-3 pt-3 border-t border-gray-700">
-                    <form onsubmit="submitReply(event, '${postId}')" class="flex flex-col gap-2">
+                <div id="reply-form-${escapeHtml(postId)}" class="hidden mt-3 pt-3 border-t border-gray-700">
+                    <form onsubmit="submitReply(event, '${escapeHtml(postId)}')" class="flex flex-col gap-2">
                         <input
                             type="text"
-                            id="reply-input-${postId}"
+                            id="reply-input-${escapeHtml(postId)}"
                             placeholder="Write a reply..."
                             class="p-2 text-gray-100 bg-[#252836] border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                             required
@@ -802,13 +853,13 @@
                         <div class="flex gap-2">
                             <input
                                 type="file"
-                                id="reply-image-${postId}"
+                                id="reply-image-${escapeHtml(postId)}"
                                 accept="image/*"
                                 class="hidden"
                             >
                             <button
                                 type="button"
-                                onclick="document.getElementById('reply-image-${postId}').click()"
+                                onclick="document.getElementById('reply-image-${escapeHtml(postId)}').click()"
                                 class="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition duration-150"
                             >
                                 📷 Image
@@ -821,14 +872,14 @@
                             </button>
                             <button
                                 type="button"
-                                onclick="hideReplyForm('${postId}')"
+                                onclick="hideReplyForm('${escapeHtml(postId)}')"
                                 class="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition duration-150"
                             >
                                 Cancel
                             </button>
                         </div>
-                        <div id="reply-preview-${postId}" class="hidden mt-2">
-                            <img id="reply-preview-img-${postId}" src="" alt="Preview" class="max-h-20 rounded-lg">
+                        <div id="reply-preview-${escapeHtml(postId)}" class="hidden mt-2">
+                            <img id="reply-preview-img-${escapeHtml(postId)}" src="" alt="Preview" class="max-h-20 rounded-lg">
                         </div>
                     </form>
                 </div>
@@ -857,18 +908,26 @@
             
             const replyHtml = document.createElement('div');
             replyHtml.className = 'flex gap-2';
-            const replyAvatar = reply.avatar 
-                ? `<img src="${API_URL}${reply.avatar}" class="w-8 h-8 rounded-full object-cover">`
-                : `<div class="avatar-placeholder" style="width: 32px; height: 32px; font-size: 12px;">${(reply.displayName || reply.sender)[0].toUpperCase()}</div>`;
-            const replyImage = reply.imageUrl ? `<img src="${API_URL}${reply.imageUrl}" alt="Reply image" class="max-w-full rounded-lg mt-1">` : '';
+            const replySenderName = reply.displayName || reply.sender || 'Unknown';
+            const replyAvatarUrl = reply.avatar 
+                ? (reply.avatar.startsWith('/uploads') ? `${API_URL}${reply.avatar}` : `${API_URL}${reply.avatar}`)
+                : null;
+            const replyAvatar = replyAvatarUrl
+                ? `<img src="${escapeHtml(replyAvatarUrl)}" class="w-8 h-8 rounded-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                   <div class="avatar-placeholder" style="width: 32px; height: 32px; font-size: 12px; display:none;">${escapeHtml(replySenderName[0].toUpperCase())}</div>`
+                : `<div class="avatar-placeholder" style="width: 32px; height: 32px; font-size: 12px;">${escapeHtml(replySenderName[0].toUpperCase())}</div>`;
+            const replyImageUrl = reply.imageUrl 
+                ? (reply.imageUrl.startsWith('/uploads') ? `${API_URL}${reply.imageUrl}` : `${API_URL}${reply.imageUrl}`)
+                : null;
+            const replyImage = replyImageUrl ? `<img src="${escapeHtml(replyImageUrl)}" alt="Reply image" class="max-w-full rounded-lg mt-1" onerror="this.style.display='none';">` : '';
             replyHtml.innerHTML = `
                 ${replyAvatar}
                 <div class="flex-1">
                     <div class="text-xs ${reply.sender === currentUser?.username ? 'text-indigo-400 font-bold' : 'text-gray-300 font-semibold'}">
-                        @${reply.displayName || reply.sender}
-                        <span class="text-gray-500 ml-2">${formatTimestamp(reply.timestamp)}</span>
+                        @${escapeHtml(replySenderName)}
+                        <span class="text-gray-500 ml-2">${escapeHtml(formatTimestamp(reply.timestamp))}</span>
                     </div>
-                    <div class="text-gray-300 text-sm mt-1">${reply.content || ''}</div>
+                    <div class="text-gray-300 text-sm mt-1">${escapeHtml(reply.content || '')}</div>
                     ${replyImage}
                 </div>
             `;
@@ -905,9 +964,9 @@
             const imageFile = imageInput.files[0];
 
             if (!content && !imageFile) {
-                return;
-            }
-
+                    return;
+                }
+                
             let imageUrl = null;
 
             if (imageFile) {
@@ -930,7 +989,7 @@
                 } catch (error) {
                     console.error('Error uploading image:', error);
                     alert('Failed to upload image');
-                    return;
+                return;
                 }
             }
 
@@ -965,8 +1024,8 @@
 
         window.deletePost = function(postId) {
             if (socket && socket.connected && postId) {
-                const postElement = postElements.get(postId);
-                if (postElement) {
+            const postElement = postElements.get(postId);
+            if (postElement) {
                     const room = postElement.getAttribute('data-room');
                     socket.emit('delete_post', { postId, room });
                 }

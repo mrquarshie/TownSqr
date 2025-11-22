@@ -62,13 +62,13 @@ const upload = multer({
 // Initialize Socket.IO with CORS enabled
 const io = socketio(server, {
     cors: {
-        origin: "*",
+        origin: "*", 
         methods: ["GET", "POST"]
     }
 });
 
 // --- In-Memory State (Simulating a Database) ---
-const posts = [];
+const posts = []; 
 const users = new Map(); // username -> { username, avatar, school, createdAt }
 const socketToUser = new Map(); // socketId -> username
 const userToSocket = new Map(); // username -> socketId
@@ -81,7 +81,7 @@ const VALID_SCHOOLS = [
     'knust',
     'university of ghana',
     'upsa'
-    'ucc'
+    
 ];
 
 // --- REST API Endpoints ---
@@ -166,7 +166,13 @@ app.post('/api/upload-avatar', upload.single('avatar'), (req, res) => {
     const username = req.body.username;
     if (!username || !users.has(username)) {
         // Delete uploaded file if user doesn't exist
-        fs.unlinkSync(req.file.path);
+        try {
+            if (req.file && req.file.path) {
+                fs.unlinkSync(req.file.path);
+            }
+        } catch (err) {
+            console.error('Error deleting uploaded file:', err);
+        }
         return res.status(400).json({ error: 'Invalid user' });
     }
     
@@ -174,9 +180,13 @@ app.post('/api/upload-avatar', upload.single('avatar'), (req, res) => {
     
     // Delete old avatar if exists
     if (user.avatar) {
-        const oldAvatarPath = path.join(uploadsDir, path.basename(user.avatar));
-        if (fs.existsSync(oldAvatarPath)) {
-            fs.unlinkSync(oldAvatarPath);
+        try {
+            const oldAvatarPath = path.join(uploadsDir, path.basename(user.avatar));
+            if (fs.existsSync(oldAvatarPath)) {
+                fs.unlinkSync(oldAvatarPath);
+            }
+        } catch (err) {
+            console.error('Error deleting old avatar:', err);
         }
     }
     
@@ -199,6 +209,18 @@ app.post('/api/upload-post-image', upload.single('image'), (req, res) => {
         success: true,
         imageUrl: `/uploads/${req.file.filename}`
     });
+}, (error, req, res, next) => {
+    // Error handler for this specific route
+    if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: 'File too large. Maximum size is 5MB.' });
+        }
+        return res.status(400).json({ error: error.message });
+    }
+    if (error) {
+        return res.status(400).json({ error: error.message || 'Upload error' });
+    }
+    next();
 });
 
 // Get user info
@@ -218,6 +240,20 @@ app.get('/api/user/:username', (req, res) => {
     });
 });
 
+// Error handling middleware for multer (must be after all routes)
+app.use((error, req, res, next) => {
+    if (error instanceof multer.MulterError) {
+        if (error.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: 'File too large. Maximum size is 5MB.' });
+        }
+        return res.status(400).json({ error: error.message });
+    }
+    if (error) {
+        return res.status(400).json({ error: error.message || 'Upload error' });
+    }
+    next();
+});
+
 // --- Socket.IO Connection Handling ---
 
 io.on('connection', (socket) => {
@@ -231,6 +267,12 @@ io.on('connection', (socket) => {
         if (!normalizedUsername || !users.has(normalizedUsername)) {
             socket.emit('auth_error', { message: 'Invalid user' });
             return;
+        }
+        
+        // Remove old socket mapping if user was already connected
+        const oldSocketId = userToSocket.get(normalizedUsername);
+        if (oldSocketId && oldSocketId !== socket.id) {
+            socketToUser.delete(oldSocketId);
         }
         
         socketToUser.set(socket.id, normalizedUsername);
@@ -273,11 +315,22 @@ io.on('connection', (socket) => {
         }
         
         const user = users.get(username);
+        if (!user) {
+            socket.emit('error', { message: 'User not found' });
+            return;
+        }
+        
         const normalizedRoom = payload.room?.toLowerCase();
         
         // Validate room access
         if (normalizedRoom !== 'general' && normalizedRoom !== user.school) {
             socket.emit('error', { message: 'You can only post to General or your school room' });
+            return;
+        }
+        
+        // Validate that post has content or image
+        if (!payload.content?.trim() && !payload.imageUrl) {
+            socket.emit('error', { message: 'Post must have content or an image' });
             return;
         }
         
@@ -287,14 +340,14 @@ io.on('connection', (socket) => {
             sender: username,
             displayName: user.displayName,
             avatar: user.avatar,
-            content: payload.content || '',
+            content: payload.content?.trim() || '',
             imageUrl: payload.imageUrl || null,
             room: normalizedRoom,
             timestamp: Date.now(),
             replies: []
         };
         
-        posts.push(newPost);
+            posts.push(newPost);
         
         console.log(`[NEW POST]: @${username} posted to ${normalizedRoom}: "${payload.content}" (ID: ${newPost.id})`);
         
@@ -375,10 +428,30 @@ io.on('connection', (socket) => {
         
         // Delete associated image if exists
         if (post.imageUrl) {
-            const imagePath = path.join(uploadsDir, path.basename(post.imageUrl));
-            if (fs.existsSync(imagePath)) {
-                fs.unlinkSync(imagePath);
+            try {
+                const imagePath = path.join(uploadsDir, path.basename(post.imageUrl));
+                if (fs.existsSync(imagePath)) {
+                    fs.unlinkSync(imagePath);
+                }
+            } catch (err) {
+                console.error('Error deleting post image:', err);
             }
+        }
+        
+        // Delete reply images if they exist
+        if (post.replies && Array.isArray(post.replies)) {
+            post.replies.forEach(reply => {
+                if (reply.imageUrl) {
+                    try {
+                        const replyImagePath = path.join(uploadsDir, path.basename(reply.imageUrl));
+                        if (fs.existsSync(replyImagePath)) {
+                            fs.unlinkSync(replyImagePath);
+                        }
+                    } catch (err) {
+                        console.error('Error deleting reply image:', err);
+                    }
+                }
+            });
         }
         
         posts.splice(postIndex, 1);
@@ -399,7 +472,11 @@ io.on('connection', (socket) => {
         const username = socketToUser.get(socket.id);
         if (username) {
             socketToUser.delete(socket.id);
-            userToSocket.delete(username);
+            // Only delete socket mapping if this is the current socket for the user
+            const currentSocketId = userToSocket.get(username);
+            if (currentSocketId === socket.id) {
+                userToSocket.delete(username);
+            }
         }
         console.log(`[USER DISCONNECTED]: ${socket.id}`);
     });
