@@ -1,1 +1,4 @@
 townsquare
+uploads/
+node_modules/
+*.log
